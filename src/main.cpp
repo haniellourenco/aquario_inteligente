@@ -4,6 +4,7 @@
 #include <LiquidCrystal_I2C.h> //Biblioteca controlar display 16x2 através do I2C
 #include <WiFi.h>
 #include "wifi_config.h"
+#include "dataCollector.h"
 
 sMQTTBroker broker;
 
@@ -40,5 +41,10 @@ void setup()
 }
 void loop()
 {
-  broker.update();
+  // broker.update();
+  float temperatura = coletarTemperatura();
+  Serial.print("Temperatura: ");
+  Serial.print(temperatura);
+  Serial.println(" °C");
+  delay(2000); // Envia a cada 5 segundos
 }
