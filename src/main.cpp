@@ -21,8 +21,8 @@ void setup()
     Serial.println("STA Failed to configure");
   }
 
-  const char *ssid = "WIFI_SSID";         // The SSID (name) of the Wi-Fi network you want to connect
-  const char *password = "WIFI_PASSWORD"; // The password of the Wi-Fi network
+  const char *ssid = WIFI_SSID;         // The SSID (name) of the Wi-Fi network you want to connect
+  const char *password = WIFI_PASSWORD; // The password of the Wi-Fi network
 
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED)
