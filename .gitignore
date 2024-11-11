@@ -4,3 +4,5 @@
 .vscode/launch.json
 .vscode/ipch
 src/wifi_config.h
+src/iot_configs.h
+src/azure-example.cpp
