@@ -1,63 +1,201 @@
 #include <Arduino.h>
-#include "sMQTTBroker.h"
-#include <Wire.h>              //Biblioteca utilizada gerenciar a comunicação entre dispositicos através do protocolo I2C
-#include <LiquidCrystal_I2C.h> //Biblioteca controlar display 16x2 através do I2C
+#include <Wire.h>              // Biblioteca para comunicação I2C
+#include <LiquidCrystal_I2C.h> // Biblioteca para controlar o display LCD via I2C
 #include <WiFi.h>
 #include "wifi_config.h"
 #include "dataCollector.h"
 
-#define col 16    // Define o número de colunas do display utilizado
-#define lin 2     // Define o número de linhas do display utilizado
-#define ende 0x27 // Define o endereço do display
+// Bibliotecas adicionais para MQTT e Azure IoT
+#include <cstdlib>
+#include <string.h>
+#include <time.h>
+#include <mqtt_client.h>
+#include <az_core.h>
+#include <az_iot.h>
+#include <azure_ca.h>
+#include "AzIoTSasToken.h"
+#include "SerialLogger.h"
+#include "iot_configs.h"
 
-LiquidCrystal_I2C lcd(ende, col, lin); // Cria o objeto lcd passando como parâmetros o endereço, o nº de colunas e o nº de linhas
+// Configurações do LCD
+#define col 16    // Número de colunas do display
+#define lin 2     // Número de linhas do display
+#define ende 0x27 // Endereço do display LCD
 
-sMQTTBroker broker;
+LiquidCrystal_I2C lcd(ende, col, lin);
 
-IPAddress local_IP(10, 0, 100, 115);
-IPAddress gateway(10, 0, 100, 1);
-IPAddress subnet(255, 255, 255, 0);
+// Configurações de MQTT e Azure IoT
+#define AZURE_SDK_CLIENT_USER_AGENT "c%2F" AZ_SDK_VERSION_STRING "(ard;esp32)"
+#define MQTT_QOS1 1
+#define DO_NOT_RETAIN_MSG 0
+#define SAS_TOKEN_DURATION_IN_MINUTES 60
+#define TELEMETRY_FREQUENCY_MILLISECS 5000
+#define NTP_SERVERS "pool.ntp.org", "time.nist.gov"
+#define PST_TIME_ZONE -8
+#define PST_TIME_ZONE_DAYLIGHT_SAVINGS_DIFF 1
+#define GMT_OFFSET_SECS (PST_TIME_ZONE * 3600)
+#define GMT_OFFSET_SECS_DST ((PST_TIME_ZONE + PST_TIME_ZONE_DAYLIGHT_SAVINGS_DIFF) * 3600)
 
-void setup()
+// Variáveis globais para Wi-Fi, MQTT e Azure IoT
+static const char *ssid = IOT_CONFIG_WIFI_SSID;
+static const char *password = IOT_CONFIG_WIFI_PASSWORD;
+static const char *host = IOT_CONFIG_IOTHUB_FQDN;
+static const char *mqtt_broker_uri = "mqtts://" IOT_CONFIG_IOTHUB_FQDN;
+static const char *device_id = IOT_CONFIG_DEVICE_ID;
+static const int mqtt_port = AZ_IOT_DEFAULT_MQTT_CONNECT_PORT;
+
+static esp_mqtt_client_handle_t mqtt_client;
+static az_iot_hub_client client;
+
+static char mqtt_client_id[128];
+static char mqtt_username[128];
+static char mqtt_password[200];
+static uint8_t sas_signature_buffer[256];
+static unsigned long next_telemetry_send_time_ms = 0;
+static char telemetry_topic[128];
+static String telemetry_payload = "{}";
+
+#ifndef IOT_CONFIG_USE_X509_CERT
+static AzIoTSasToken sasToken(
+    &client,
+    AZ_SPAN_FROM_STR(IOT_CONFIG_DEVICE_KEY),
+    AZ_SPAN_FROM_BUFFER(sas_signature_buffer),
+    AZ_SPAN_FROM_BUFFER(mqtt_password));
+#endif
+
+// Funções auxiliares
+static void connectToWiFi()
 {
-
-  Serial.begin(115200);
-
-  if (!WiFi.config(local_IP, gateway, subnet))
-  {
-    Serial.println("STA Failed to configure");
-  }
-
-  const char *ssid = WIFI_SSID;         // The SSID (name) of the Wi-Fi network you want to connect
-  const char *password = WIFI_PASSWORD; // The password of the Wi-Fi network
-
+  Logger.Info("Connecting to WiFi...");
+  WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED)
-  { // Wait for the Wi-Fi to connect
-    delay(1000);
-    Serial.println("Connecting to WiFi..");
+  {
+    delay(500);
+    Serial.print(".");
   }
-  Serial.println("Connection established!");
-  Serial.print("IP address:\t");
-  Serial.println(WiFi.localIP());
-
-  lcd.init();      // Inicializa a comunicação com o display já conectado
-  lcd.clear();     // Limpa a tela do display
-  lcd.backlight(); // Aciona a luz de fundo do display
-  // const unsigned short mqttPort = 1883;
-  // broker.init(mqttPort);
-  // all done
+  Serial.println("\nWiFi connected. IP: " + WiFi.localIP().toString());
 }
+
+static void initializeTime()
+{
+  Logger.Info("Setting time using SNTP...");
+  configTime(GMT_OFFSET_SECS, GMT_OFFSET_SECS_DST, NTP_SERVERS);
+  time_t now = time(NULL);
+  while (now < 1510592825) // Tempo base (13 de novembro de 2017)
+  {
+    delay(500);
+    now = time(nullptr);
+  }
+  Logger.Info("Time synchronized.");
+}
+
+static void initializeIoTHubClient()
+{
+  az_iot_hub_client_options options = az_iot_hub_client_options_default();
+  options.user_agent = AZ_SPAN_FROM_STR(AZURE_SDK_CLIENT_USER_AGENT);
+
+  if (az_result_failed(az_iot_hub_client_init(&client, az_span_create((uint8_t *)host, strlen(host)),
+                                              az_span_create((uint8_t *)device_id, strlen(device_id)), &options)))
+  {
+    Logger.Error("Failed to initialize IoT Hub client.");
+    return;
+  }
+
+  az_iot_hub_client_get_client_id(&client, mqtt_client_id, sizeof(mqtt_client_id), NULL);
+  az_iot_hub_client_get_user_name(&client, mqtt_username, sizeof(mqtt_username), NULL);
+
+  Logger.Info("IoT Hub client initialized.");
+}
+
+static int initializeMqttClient()
+{
+#ifndef IOT_CONFIG_USE_X509_CERT
+  if (sasToken.Generate(SAS_TOKEN_DURATION_IN_MINUTES) != 0)
+  {
+    Logger.Error("Failed generating SAS token.");
+    return 1;
+  }
+#endif
+
+  esp_mqtt_client_config_t mqtt_config = {};
+  mqtt_config.uri = mqtt_broker_uri;
+  mqtt_config.client_id = mqtt_client_id;
+  mqtt_config.username = mqtt_username;
+  mqtt_config.password = (const char *)az_span_ptr(sasToken.Get());
+  mqtt_config.cert_pem = (const char *)ca_pem;
+
+  mqtt_client = esp_mqtt_client_init(&mqtt_config);
+  if (mqtt_client == NULL)
+  {
+    Logger.Error("Failed creating MQTT client.");
+    return 1;
+  }
+
+  esp_err_t start_result = esp_mqtt_client_start(mqtt_client);
+  if (start_result != ESP_OK)
+  {
+    Logger.Error("Failed starting MQTT client.");
+    return 1;
+  }
+
+  Logger.Info("MQTT client initialized.");
+  return 0;
+}
+
+static void generateTelemetryPayload(float temperature)
+{
+  telemetry_payload = "{ \"temperatura\": " + String(temperature) + " }";
+}
+
+static void sendTelemetry(float temperature)
+{
+  if (az_result_failed(az_iot_hub_client_telemetry_get_publish_topic(&client, NULL, telemetry_topic, sizeof(telemetry_topic), NULL)))
+  {
+    Logger.Error("Failed to get telemetry topic.");
+    return;
+  }
+
+  generateTelemetryPayload(temperature);
+
+  if (esp_mqtt_client_publish(mqtt_client, telemetry_topic, telemetry_payload.c_str(), telemetry_payload.length(),
+                              MQTT_QOS1, DO_NOT_RETAIN_MSG) == 0)
+  {
+    Logger.Error("Failed publishing telemetry.");
+  }
+  else
+  {
+    Logger.Info("Telemetry sent: " + telemetry_payload);
+  }
+}
+
+// Setup e loop principais
+void setup()
+{
+  Serial.begin(115200);
+  lcd.init();
+  lcd.clear();
+  lcd.backlight();
+
+  connectToWiFi();
+  initializeTime();
+  initializeIoTHubClient();
+  initializeMqttClient();
+}
+
 void loop()
 {
-  // broker.update();
+  if (WiFi.status() != WL_CONNECTED)
+  {
+    connectToWiFi();
+  }
+
   float temperatura = coletarTemperatura();
-  Serial.print("Temperatura: ");
-  Serial.print(temperatura);
-  Serial.println(" °C");
-  lcd.setCursor(0, 0);                               // Coloca o cursor do display na coluna 1 e linha 1
-  lcd.print("Temp.: " + (String)temperatura + " C"); // Exibe a mensagem na primeira linha do display
-  // lcd.setCursor(0, 1);           // Coloca o cursor do display na coluna 1 e linha 2
-  // lcd.print("TUTORIAL DISPLAY"); // Exibe a mensagem na segunda linha do display
-  delay(2000); // Envia a cada 5 segundos
+  sendTelemetry(temperatura);
+
+  // Exibição no LCD
+  lcd.setCursor(0, 0);
+  lcd.print("Temp.: " + String(temperatura) + " C");
+
+  delay(2000); // Intervalo entre leituras
 }
