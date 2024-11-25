@@ -143,12 +143,13 @@ static int initializeMqttClient()
   return 0;
 }
 
-static void generateTelemetryPayload(float temperature)
+static void generateTelemetryPayload(float temperature, float ph)
 {
-  telemetry_payload = "{ \"temperatura\": " + String(temperature) + " }";
+  // gera o payload com a temperatura em valor arredondado em inteiro e tambem o ph com uma casa decimal
+  telemetry_payload = "{ \"temperatura\": " + String((int)round(temperature)) + ", \"ph\": " + String(ph, 1) + " }";
 }
 
-static void sendTelemetry(float temperature)
+static void sendTelemetry(float temperature, float ph)
 {
   if (az_result_failed(az_iot_hub_client_telemetry_get_publish_topic(&client, NULL, telemetry_topic, sizeof(telemetry_topic), NULL)))
   {
@@ -156,7 +157,7 @@ static void sendTelemetry(float temperature)
     return;
   }
 
-  generateTelemetryPayload(temperature);
+  generateTelemetryPayload(temperature, ph);
 
   if (esp_mqtt_client_publish(mqtt_client, telemetry_topic, telemetry_payload.c_str(), telemetry_payload.length(),
                               MQTT_QOS1, DO_NOT_RETAIN_MSG) == 0)
@@ -191,11 +192,15 @@ void loop()
   }
 
   float temperatura = coletarTemperatura();
-  sendTelemetry(temperatura);
+  float ph = 7.1; // Valor fixo simulando o sensor de pH
+
+  sendTelemetry(temperatura, ph);
 
   // Exibição no LCD
   lcd.setCursor(0, 0);
-  lcd.print("Temp.: " + String(temperatura) + " C");
+  lcd.print("Temp: " + String((int)temperatura) + " C");
+  lcd.setCursor(0, 1);
+  lcd.print("pH: " + String(ph, 1));
 
   delay(2000); // Intervalo entre leituras
 }
