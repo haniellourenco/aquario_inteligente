@@ -3,5 +3,6 @@
 
 // Função para coletar dados do sensor de temperatura
 float coletarTemperatura();
+float coletarPh();
 
 #endif

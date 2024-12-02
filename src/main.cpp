@@ -192,7 +192,8 @@ void loop()
   }
 
   float temperatura = coletarTemperatura();
-  float ph = 7.1; // Valor fixo simulando o sensor de pH
+  float ph = coletarPh(); // Valor do sensor de pH
+  // float ph = 7.1; // Valor fixo simulando o sensor de pH
 
   sendTelemetry(temperatura, ph);
 

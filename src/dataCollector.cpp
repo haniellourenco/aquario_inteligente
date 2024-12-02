@@ -11,6 +11,9 @@ double To = 298.15;     // VALOR EM KELVIN REFERENTE A 25° CELSIUS
 double Ro = 10000;      // RESISTÊNCIA DO NTC A 25°C
 double adcMax = 4095.0; // Valor máximo de ADC para ESP32
 
+// variáveis para cálculo do ph
+int buf[10];
+
 // Implementação da função para coletar a temperatura
 float coletarTemperatura()
 {
@@ -28,4 +31,24 @@ float coletarTemperatura()
     Tc = T - 273.15;                        // Conversão de Kelvin para Celsius
 
     return Tc; // Retorna a temperatura em °C
+}
+
+float coletarPh()
+{
+    for (int i = 0; i < 10; i++)
+    {                            // 11 amostras
+        buf[i] = analogRead(A0); // Ler o sensor PH
+        // DEFINIR O PINO LA EM CIMA
+        delay(10);
+    }
+
+    int valorMedio = 0;
+    for (int i = 2; i < 8; i++)
+    { // Realiza o valor médio utilizando 6 amostras
+        valorMedio += buf[i];
+    }
+
+    float tensao = (valorMedio * 5.0) / 1024.0 / 6;
+    Serial.println(tensao);
+    return tensao;
 }
