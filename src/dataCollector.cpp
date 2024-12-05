@@ -35,20 +35,21 @@ float coletarTemperatura()
 
 float coletarPh()
 {
-    for (int i = 0; i < 10; i++)
-    {                            // 11 amostras
-        buf[i] = analogRead(A0); // Ler o sensor PH
-        // DEFINIR O PINO LA EM CIMA
-        delay(10);
-    }
+    int measure = analogRead(A0);
+    Serial.print("Measure: ");
+    Serial.print(measure);
 
-    int valorMedio = 0;
-    for (int i = 2; i < 8; i++)
-    { // Realiza o valor médio utilizando 6 amostras
-        valorMedio += buf[i];
-    }
+    double voltage = 5 / 1024.0 * measure; // classic digital to voltage conversion
+    Serial.print("\tVoltage: ");
+    Serial.print(voltage, 3);
 
-    float tensao = (valorMedio * 5.0) / 1024.0 / 6;
-    Serial.println(tensao);
-    return tensao;
+    // PH_step = (voltage@PH7 - voltage@PH4) / (PH7 - PH4)
+    // PH_probe = PH7 - ((voltage@PH7 - voltage@probe) / PH_step)
+    float Po = 7 + ((2.5 - voltage) / 0.18);
+    Serial.print("\tPH: ");
+    Serial.print(Po, 3);
+    return Po;
+
+    // Serial.println("");
+    // delay(2000);
 }
