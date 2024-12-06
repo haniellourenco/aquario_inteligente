@@ -4,6 +4,7 @@
 
 // Definições de pinos e constantes para o sensor NTC10K
 int PinoNTC = 32;       // PINO DO NTC10K
+int PinoPh = 34;        // PINO DO SENSOR PH
 double Vs = 3.3;        // TENSÃO DE SAÍDA DO ESP32
 double R1 = 10000;      // RESISTOR UTILIZADO NO DIVISOR DE TENSÃO
 double Beta = 3950;     // VALOR DE BETA
@@ -35,19 +36,19 @@ float coletarTemperatura()
 
 float coletarPh()
 {
-    int measure = analogRead(A0);
-    Serial.print("Measure: ");
-    Serial.print(measure);
+    int measure = analogRead(PinoPh);
+    // Serial.print("Measure: ");
+    // Serial.print(measure);
 
     double voltage = 5 / 1024.0 * measure; // classic digital to voltage conversion
-    Serial.print("\tVoltage: ");
-    Serial.print(voltage, 3);
+    // Serial.print("\tVoltage: ");
+    // Serial.print(voltage, 3);
 
     // PH_step = (voltage@PH7 - voltage@PH4) / (PH7 - PH4)
     // PH_probe = PH7 - ((voltage@PH7 - voltage@probe) / PH_step)
     float Po = 7 + ((2.5 - voltage) / 0.18);
-    Serial.print("\tPH: ");
-    Serial.print(Po, 3);
+    // Serial.print("\tPH: ");
+    // Serial.print(Po, 3);
     return Po;
 
     // Serial.println("");

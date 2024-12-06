@@ -63,6 +63,8 @@ static AzIoTSasToken sasToken(
     AZ_SPAN_FROM_BUFFER(mqtt_password));
 #endif
 
+int PinoRele = 26;
+
 // Funções auxiliares
 static void connectToWiFi()
 {
@@ -178,6 +180,8 @@ void setup()
   lcd.clear();
   lcd.backlight();
 
+  pinMode(PinoRele, OUTPUT);
+
   connectToWiFi();
   initializeTime();
   initializeIoTHubClient();
@@ -194,6 +198,16 @@ void loop()
   float temperatura = coletarTemperatura();
   float ph = coletarPh(); // Valor do sensor de pH
   // float ph = 7.1; // Valor fixo simulando o sensor de pH
+
+  // ligar rele se temperatura maior que 25 graus
+  if (temperatura > 25)
+  {
+    digitalWrite(PinoRele, LOW);
+  }
+  else
+  {
+    digitalWrite(PinoRele, HIGH);
+  }
 
   sendTelemetry(temperatura, ph);
 
